@@ -346,4 +346,3 @@ MIT License
 
 ---
 
-*Powered by Caffeine and LLMs ☕🤖*
