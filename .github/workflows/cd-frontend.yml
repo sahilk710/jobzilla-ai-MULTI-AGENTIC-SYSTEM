@@ -1,0 +1,53 @@
+name: CD - Deploy Frontend
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/cd-frontend.yml'
+
+env:
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  SERVICE_NAME: killmatch-frontend
+  REGION: us-central1
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker
+        run: gcloud auth configure-docker us-central1-docker.pkg.dev
+
+      - name: Build and Push
+        run: |
+          docker build -t us-central1-docker.pkg.dev/$PROJECT_ID/$SERVICE_NAME/$SERVICE_NAME:${{ github.sha }} ./frontend
+          docker push us-central1-docker.pkg.dev/$PROJECT_ID/$SERVICE_NAME/$SERVICE_NAME:${{ github.sha }}
+
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy $SERVICE_NAME \
+            --image us-central1-docker.pkg.dev/$PROJECT_ID/$SERVICE_NAME/$SERVICE_NAME:${{ github.sha }} \
+            --region $REGION \
+            --platform managed \
+            --allow-unauthenticated \
+            --set-env-vars "BACKEND_URL=https://killmatch-backend-95714121537.us-central1.run.app" \
+            --set-env-vars "DATABASE_URL=${{ secrets.DATABASE_URL }}" \
+            --set-env-vars "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}" \
+            --set-env-vars "GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}" \
+            --set-env-vars "GOOGLE_CLIENT_SECRET=${{ secrets.GOOGLE_CLIENT_SECRET }}" \
+            --set-env-vars "REDIRECT_URI=https://killmatch-frontend-95714121537.us-central1.run.app" \
+            --port 8501 \
+            --memory 1Gi \
+            --min-instances 0 \
+            --max-instances 2

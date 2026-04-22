@@ -1,0 +1,546 @@
+"""
+Daily Airflow DAG: scrape jobs (Greenhouse + Lever) and ingest into Postgres.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from typing import Any
+from urllib.parse import parse_qs, urlparse
+
+from airflow.operators.python import PythonOperator
+
+from airflow import DAG
+
+default_args = {
+    "owner": "jobzilla",
+    "depends_on_past": False,
+    "email_on_failure": True,
+    "email_on_retry": False,
+    "retries": 2,
+    "retry_delay": timedelta(minutes=5),
+}
+
+dag = DAG(
+    dag_id="job_scrape_ingest_daily",
+    default_args=default_args,
+    description="Scrape from Greenhouse/Lever every 4 hours and idempotent Postgres ingest",
+    schedule_interval="0 */4 * * *",  # Every 4 hours
+    start_date=datetime(2024, 1, 1),
+    catchup=False,
+    tags=["jobs", "scraping", "postgres"],
+)
+
+
+DEFAULT_SEEDS = [
+    "https://boards.greenhouse.io/openai",
+    "https://boards.greenhouse.io/stripe",
+    "https://boards.greenhouse.io/figma",
+    "https://boards.greenhouse.io/discord",
+    "https://boards.greenhouse.io/coinbase",
+    "https://boards.greenhouse.io/databricks",
+    "https://boards.greenhouse.io/anthropic",
+    "https://boards.greenhouse.io/notion",
+    "https://boards.greenhouse.io/duolingo",
+    "https://boards.greenhouse.io/airbnb",
+    "https://boards.greenhouse.io/speechify",
+    "https://jobs.lever.co/figma",
+    "https://jobs.lever.co/spotify",
+    "https://jobs.lever.co/netflix",
+    "https://jobs.lever.co/explodingkittens",
+]
+DEFAULT_MAX_SEEDS = 500
+
+
+def _html_to_text(html: str | None) -> str:
+    from bs4 import BeautifulSoup
+
+    if not html:
+        return ""
+    soup = BeautifulSoup(html, "html.parser")
+    text = soup.get_text("\n", strip=True)
+    return re.sub(r"\n{3,}", "\n\n", text).strip()
+
+
+def _humanize_name(raw: str) -> str:
+    return (
+        re.sub(r"\s{2,}", " ", raw.replace("-", " ").replace("_", " ")).strip().title()
+    )
+
+
+def _infer_experience_level(title: str, description: str) -> str:
+    text = f"{title} {description[:800]}".lower()
+    if re.search(r"\b(intern|internship|co-?op)\b", text):
+        return "Internship"
+    if re.search(
+        r"\b(entry[- ]level|junior|jr\.?|associate|new grad|0-2 years?|1-2 years?)\b",
+        text,
+    ):
+        return "Entry"
+    if re.search(r"\b(vp |vice president|chief |cto|ceo|coo|president)\b", text):
+        return "Executive"
+    if re.search(r"\b(principal|staff engineer|distinguished|fellow)\b", text):
+        return "Staff"
+    if re.search(
+        r"\b(senior|sr\.? |lead |architect|director|head of|manager|[5-9]\+? years?|1[0-9]\+? years?)\b",
+        text,
+    ):
+        return "Senior"
+    return "Mid"
+
+
+def _infer_remote_type(title: str, location: str, description: str) -> str:
+    text = f"{title} {location} {description[:600]}".lower()
+    if re.search(
+        r"\b(fully remote|100% remote|work from home|wfh|remote only|remote-first|remote first)\b",
+        text,
+    ):
+        return "Remote"
+    if re.search(r"\bremote\b", text) and re.search(
+        r"\b(hybrid|flexible|occasional)\b", text
+    ):
+        return "Hybrid"
+    if re.search(r"\bhybrid\b", text):
+        return "Hybrid"
+    if re.search(r"\b(on-?site|in[- ]office|in[- ]person)\b", text):
+        return "On-site"
+    if re.search(r"\bremote\b", text):
+        return "Remote"
+    return "On-site"
+
+
+def _get_seed_urls() -> list[str]:
+    max_seeds = int(os.getenv("JOB_SCRAPE_MAX_SEEDS", str(DEFAULT_MAX_SEEDS)))
+    value = os.getenv("JOB_SCRAPE_SEEDS", "")
+    if value.strip():
+        cleaned = [seed.strip() for seed in value.split(",") if seed.strip()]
+        return cleaned[:max_seeds]
+    return DEFAULT_SEEDS[:max_seeds]
+
+
+def _extract_greenhouse_board_token(seed_url: str) -> str | None:
+    parsed = urlparse(seed_url)
+    query = parse_qs(parsed.query)
+    if query.get("for"):
+        return query["for"][0]
+
+    parts = [part for part in parsed.path.split("/") if part]
+    if parsed.netloc.lower().startswith("boards-api.greenhouse.io"):
+        try:
+            idx = parts.index("boards")
+            return parts[idx + 1]
+        except (ValueError, IndexError):
+            return None
+    return parts[0] if parts else None
+
+
+def _extract_lever_site_token(seed_url: str) -> str | None:
+    parsed = urlparse(seed_url)
+    parts = [part for part in parsed.path.split("/") if part]
+    if parsed.netloc.lower().startswith("api.lever.co"):
+        if len(parts) >= 3 and parts[0] == "v0" and parts[1] == "postings":
+            return parts[2]
+        return None
+    return parts[0] if parts else None
+
+
+def _fetch_greenhouse_jobs(session: Any, seed_url: str) -> list[dict[str, Any]]:
+    board = _extract_greenhouse_board_token(seed_url)
+    if not board:
+        print(f"[greenhouse] Could not parse board token from seed: {seed_url}")
+        return []
+    response = session.get(
+        f"https://boards-api.greenhouse.io/v1/boards/{board}/jobs?content=true",
+        timeout=30,
+    )
+    response.raise_for_status()
+    data = response.json()
+
+    scraped_at = datetime.utcnow().isoformat()
+    jobs: list[dict[str, Any]] = []
+    for job in data.get("jobs", []):
+        source_url = job.get("absolute_url") or job.get("url")
+        if not source_url:
+            continue
+        location_obj = job.get("location") or {}
+        location = (
+            location_obj.get("name")
+            if isinstance(location_obj, dict)
+            else str(location_obj or "")
+        )
+        company = (
+            job.get("company")
+            or job.get("company_name")
+            or data.get("name")
+            or _humanize_name(board)
+        )
+        title = (job.get("title") or "").strip()
+        description = _html_to_text(job.get("content") or "")
+        loc_str = location or ""
+        jobs.append(
+            {
+                "title": title,
+                "company": company,
+                "location": location or None,
+                "description": description,
+                "source_url": source_url,
+                "source_platform": "greenhouse",
+                "scraped_at": scraped_at,
+                "experience_level": _infer_experience_level(title, description),
+                "remote_type": _infer_remote_type(title, loc_str, description),
+            }
+        )
+    print(f"[greenhouse] {board}: scraped {len(jobs)} jobs")
+    return jobs
+
+
+def _fetch_lever_jobs(session: Any, seed_url: str) -> list[dict[str, Any]]:
+    site = _extract_lever_site_token(seed_url)
+    if not site:
+        print(f"[lever] Could not parse site token from seed: {seed_url}")
+        return []
+    response = session.get(
+        f"https://api.lever.co/v0/postings/{site}?mode=json", timeout=30
+    )
+    response.raise_for_status()
+    postings = response.json()
+
+    scraped_at = datetime.utcnow().isoformat()
+    jobs: list[dict[str, Any]] = []
+    for posting in postings:
+        source_url = posting.get("hostedUrl") or posting.get("applyUrl")
+        if not source_url:
+            continue
+        categories = posting.get("categories") or {}
+        description_chunks: list[str] = []
+        if posting.get("description"):
+            description_chunks.append(posting["description"])
+        if posting.get("descriptionPlain"):
+            description_chunks.append(posting["descriptionPlain"])
+        if isinstance(posting.get("lists"), list):
+            for section in posting["lists"]:
+                content = section.get("content") if isinstance(section, dict) else ""
+                if content:
+                    description_chunks.append(content)
+        title = (posting.get("text") or "").strip()
+        loc_str = categories.get("location") or ""
+        description = _html_to_text("\n".join(description_chunks))
+        jobs.append(
+            {
+                "title": title,
+                "company": posting.get("company") or _humanize_name(site),
+                "location": loc_str or None,
+                "description": description,
+                "source_url": source_url,
+                "source_platform": "lever",
+                "scraped_at": scraped_at,
+                "experience_level": _infer_experience_level(title, description),
+                "remote_type": _infer_remote_type(title, loc_str, description),
+            }
+        )
+    print(f"[lever] {site}: scraped {len(jobs)} jobs")
+    return jobs
+
+
+def _scrape_all_jobs() -> list[dict[str, Any]]:
+    import requests
+
+    seeds = _get_seed_urls()
+    print(f"[scrape_all_jobs] Using {len(seeds)} seed(s)")
+    all_jobs: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    with requests.Session() as session:
+        session.headers.update(
+            {"User-Agent": "jobzilla-airflow-scraper/1.0", "Accept": "application/json"}
+        )
+        for seed in seeds:
+            netloc = urlparse(seed).netloc.lower()
+            try:
+                if "greenhouse" in netloc:
+                    jobs = _fetch_greenhouse_jobs(session, seed)
+                elif "lever.co" in netloc:
+                    jobs = _fetch_lever_jobs(session, seed)
+                else:
+                    print(f"[scrape_all_jobs] Unsupported seed, skipping: {seed}")
+                    continue
+            except Exception as exc:
+                print(f"[scrape_all_jobs] Error scraping seed '{seed}': {exc}")
+                continue
+
+            for job in jobs:
+                source_url = (job.get("source_url") or "").strip()
+                if source_url and source_url not in seen:
+                    seen.add(source_url)
+                    all_jobs.append(job)
+
+    print(f"[scrape_all_jobs] Total unique jobs scraped: {len(all_jobs)}")
+    return all_jobs
+
+
+def _parse_scraped_at(value: Any) -> datetime:
+    if isinstance(value, datetime):
+        if value.tzinfo:
+            return value.astimezone(UTC).replace(tzinfo=None)
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            if parsed.tzinfo:
+                return parsed.astimezone(UTC).replace(tzinfo=None)
+            return parsed
+        except ValueError:
+            pass
+    return datetime.utcnow()
+
+
+def _get_conn_string() -> str:
+    url = os.getenv("DATABASE_URL")
+    if url:
+        return (
+            url.replace("+asyncpg", "")
+            .replace("+psycopg2", "")
+            .replace("postgres://", "postgresql://")
+        )
+
+    host = os.getenv("DB_HOST", os.getenv("PGHOST", "localhost"))
+    port = os.getenv("DB_PORT", os.getenv("PGPORT", "5432"))
+    name = os.getenv("DB_NAME", os.getenv("PGDATABASE", "killmatch"))
+    user = os.getenv("DB_USER", os.getenv("PGUSER", "postgres"))
+    password = os.getenv("DB_PASSWORD", os.getenv("PGPASSWORD", ""))
+    return f"dbname={name} user={user} password={password} host={host} port={port}"
+
+
+def _upsert_jobs(jobs: list[dict[str, Any]]) -> dict[str, int]:
+    import psycopg2
+
+    deduped: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for job in jobs:
+        source_url = (job.get("source_url") or "").strip()
+        if not source_url or source_url in seen:
+            continue
+        seen.add(source_url)
+        deduped.append(
+            {
+                "title": (
+                    (job.get("title") or "Untitled Role").strip() or "Untitled Role"
+                )[:500],
+                "company": (
+                    (job.get("company") or "Unknown Company").strip()
+                    or "Unknown Company"
+                )[:255],
+                "location": (
+                    str(job.get("location")).strip()[:255]
+                    if job.get("location")
+                    else None
+                ),
+                "description": job.get("description") or "",
+                "source_url": source_url[:1000],
+                "source_platform": (
+                    (job.get("source_platform") or "unknown").strip() or "unknown"
+                )[:100],
+                "scraped_at": _parse_scraped_at(job.get("scraped_at")),
+                "experience_level": job.get("experience_level"),
+                "remote_type": job.get("remote_type"),
+            }
+        )
+
+    if not deduped:
+        print("[upsert_jobs] No valid jobs to ingest.")
+        return {"inserted": 0, "updated": 0}
+
+    upsert_sql = """
+        INSERT INTO jobs (
+            title, company, location, description, source_url, source_platform,
+            scraped_at, is_active, experience_level, remote_type
+        )
+        VALUES (
+            %(title)s, %(company)s, %(location)s, %(description)s, %(source_url)s,
+            %(source_platform)s, %(scraped_at)s, true, %(experience_level)s, %(remote_type)s
+        )
+        ON CONFLICT (source_url)
+        DO UPDATE SET
+            title = EXCLUDED.title,
+            company = EXCLUDED.company,
+            location = EXCLUDED.location,
+            description = EXCLUDED.description,
+            source_platform = EXCLUDED.source_platform,
+            scraped_at = EXCLUDED.scraped_at,
+            is_active = true,
+            experience_level = EXCLUDED.experience_level,
+            remote_type = EXCLUDED.remote_type
+        RETURNING (xmax = 0) AS inserted;
+    """
+
+    inserted = 0
+    updated = 0
+    conn = psycopg2.connect(_get_conn_string())
+    try:
+        with conn, conn.cursor() as cur:
+            for job in deduped:
+                cur.execute(upsert_sql, job)
+                if bool(cur.fetchone()[0]):
+                    inserted += 1
+                else:
+                    updated += 1
+    finally:
+        conn.close()
+
+    print(
+        f"[upsert_jobs] input={len(jobs)} normalized={len(deduped)} inserted={inserted} updated={updated}"
+    )
+    return {"inserted": inserted, "updated": updated}
+
+
+def scrape_jobs_task(**context) -> int:
+    jobs = _scrape_all_jobs()
+    run_id = re.sub(r"[^A-Za-z0-9_.-]+", "_", context["run_id"])
+    output_path = Path(f"/tmp/job_scrape_{run_id}.json")
+    output_path.write_text(json.dumps(jobs), encoding="utf-8")
+    context["ti"].xcom_push(key="scraped_jobs_path", value=str(output_path))
+    print(f"[scrape_jobs_task] Number of jobs scraped: {len(jobs)}")
+    print(f"[scrape_jobs_task] Wrote scrape payload: {output_path}")
+    return len(jobs)
+
+
+def ingest_jobs_task(**context) -> int:
+    payload_path = context["ti"].xcom_pull(
+        task_ids="scrape_jobs", key="scraped_jobs_path"
+    )
+    if not payload_path:
+        raise ValueError("Missing scraped_jobs_path in XCom")
+    jobs = json.loads(Path(payload_path).read_text(encoding="utf-8"))
+    print(f"[ingest_jobs_task] Number of jobs received from scrape task: {len(jobs)}")
+    stats = _upsert_jobs(jobs)
+    print(
+        f"[ingest_jobs_task] inserted={stats.get('inserted', 0)} updated={stats.get('updated', 0)}"
+    )
+    return int(stats.get("inserted", 0)) + int(stats.get("updated", 0))
+
+
+def embed_jobs_task(**context) -> int:
+    """Embed newly ingested jobs into Pinecone for semantic search."""
+    import psycopg2
+    from openai import OpenAI
+    from pinecone import Pinecone
+
+    openai_key = os.getenv("OPENAI_API_KEY", "")
+    pinecone_key = os.getenv("PINECONE_API_KEY", "")
+    index_name = os.getenv("PINECONE_INDEX_NAME", "killmatch-jobs")
+
+    if not openai_key or not pinecone_key:
+        print("[embed_jobs] Missing OPENAI_API_KEY or PINECONE_API_KEY, skipping")
+        return 0
+
+    client = OpenAI(api_key=openai_key)
+    pc = Pinecone(api_key=pinecone_key)
+    index = pc.Index(index_name)
+
+    conn = psycopg2.connect(_get_conn_string())
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT id, title, company, location, description, source_url, source_platform
+        FROM jobs
+        WHERE embedding_id IS NULL AND is_active = true
+        AND source_url IS NOT NULL AND source_url != ''
+        AND source_url NOT LIKE '%%linkedin.com%%'
+        AND source_url NOT LIKE '%%indeed.com%%'
+        AND title NOT LIKE '%%[...]%%'
+        AND title NOT LIKE '%%###%%'
+        AND company != 'Unknown'
+        ORDER BY scraped_at DESC
+        LIMIT 500
+        """)
+    rows = cur.fetchall()
+
+    if not rows:
+        print("[embed_jobs] No jobs to embed")
+        cur.close()
+        conn.close()
+        return 0
+
+    print(f"[embed_jobs] Embedding {len(rows)} jobs")
+    embedded = 0
+    batch_size = 50
+
+    for i in range(0, len(rows), batch_size):
+        batch = rows[i : i + batch_size]
+        texts = [
+            f"{row[1]} at {row[2]}. {row[3] or ''}. {(row[4] or '')[:500]}"
+            for row in batch
+        ]
+
+        response = client.embeddings.create(
+            model="text-embedding-3-small",
+            input=texts,
+        )
+
+        vectors = []
+        for j, row in enumerate(batch):
+            job_id = str(row[0])
+            vectors.append(
+                {
+                    "id": job_id,
+                    "values": response.data[j].embedding,
+                    "metadata": {
+                        "title": row[1] or "",
+                        "company": row[2] or "",
+                        "location": row[3] or "",
+                        "description": (row[4] or "")[:500],
+                        "url": row[5] or "",
+                        "source": row[6] or "",
+                        "job_id": str(row[0]),
+                    },
+                }
+            )
+
+        index.upsert(vectors=vectors)
+
+        update_cur = conn.cursor()
+        for row in batch:
+            update_cur.execute(
+                "UPDATE jobs SET embedding_id = %s WHERE id = %s",
+                (str(row[0]), row[0]),
+            )
+        conn.commit()
+        update_cur.close()
+        embedded += len(batch)
+        print(f"[embed_jobs] Batch {i // batch_size + 1}: embedded {len(batch)} jobs")
+
+    cur.close()
+    conn.close()
+    print(f"[embed_jobs] Total embedded: {embedded}")
+    return embedded
+
+
+scrape_jobs = PythonOperator(
+    task_id="scrape_jobs",
+    python_callable=scrape_jobs_task,
+    dag=dag,
+)
+
+ingest_jobs = PythonOperator(
+    task_id="ingest_jobs",
+    python_callable=ingest_jobs_task,
+    dag=dag,
+)
+
+embed_jobs = PythonOperator(
+    task_id="embed_jobs",
+    python_callable=embed_jobs_task,
+    dag=dag,
+)
+
+scrape_jobs >> ingest_jobs >> embed_jobs
+
+# Local test commands:
+# export JOB_SCRAPE_SEEDS="https://boards.greenhouse.io/openai,https://jobs.lever.co/figma"
+# export DATABASE_URL="postgresql+psycopg2://postgres:postgres@localhost:5432/killmatch"
+# python scripts/scrape_jobs_bs_only.py
+# python scripts/ingest_jobs_to_db.py
+# airflow dags test job_scrape_ingest_daily 2026-02-19
