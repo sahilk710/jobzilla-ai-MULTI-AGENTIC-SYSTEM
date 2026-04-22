@@ -2,270 +2,215 @@
 
 > *"AI Agents That Debate Your Fit and Tailor Your Resume — So Every Application Counts."*
 
-Jobzilla AI is a comprehensive intelligent assistant designed to be your personalized **job search and application companion**. Built on a modern microservices architecture, this application leverages cutting-edge AI technologies for **semantic job matching**, **multi-agent debate analysis**, and **automated resume & cover letter generation**. Powered by OpenAI GPT-4, LangGraph multi-agent orchestration, and Pinecone vector embeddings, it helps job seekers discover high-fit opportunities, receive brutally honest AI feedback, generate ATS-optimized resumes, and write personalized cover letters — all tailored to your specific skills, experience, and career goals.
+Jobzilla AI is a generative-AI application that simulates a hiring committee to compress a 45-minute resume-tailoring workflow into under 30 seconds. Instead of opaque ATS scores, three AI agents — a Recruiter (critic), a Coach (advocate), and a Judge (arbiter) — **debate your candidacy** in real time, then the pipeline generates an ATS-optimized resume, a personalized cover letter, and a targeted skill-gap analysis for each job.
+
+Built with **GPT-4o** for reasoning, **Mistral** for resume parsing, **Pinecone** (`text-embedding-3-small`, 1536-d) for semantic job retrieval, and **LangGraph** for multi-agent orchestration.
 
 ---
 
-## ✍️ Authors
+## 🌐 Access the Application
 
-| Name | GitHub |
-|------|--------|
-| Hrishi Pal | [@HrishiPal21](https://github.com/HrishiPal21) |
-| Inchara Adigante | [@IncharaAdigante](https://github.com/IncharaAdigante) |
-| Sahil Kasliwal | [@sahilk710](https://github.com/sahilk710) |
-
----
-
-## 🌱 Project Evolution
-
-Over the past 3 months, Jobzilla AI has evolved from a simple job matching concept into a sophisticated, enterprise-grade multi-agent AI application with automated data pipelines, real-time debate orchestration, and a full CI/CD deployment on GCP Cloud Run.
-
-📂 [View Full Project Log (Google Drive)](https://shorturl.at/OjOAG)
+| Service | URL |
+|---------|-----|
+| 💻 **Frontend (Streamlit)** | https://killmatch-frontend-95714121537.us-central1.run.app/ |
+| 📚 **Backend API Docs** | https://killmatch-backend-95714121537.us-central1.run.app/docs |
+| 🐙 **GitHub MCP Server** | https://killmatch-mcp-github-95714121537.us-central1.run.app/docs |
+| 💼 **Job Market MCP Server** | https://killmatch-mcp-jobmarket-95714121537.us-central1.run.app/docs |
 
 ---
 
-## 📢 Project Poster
+## 📘 About This Submission
 
-![Jobzilla AI Poster](docs/images/JobzillaPoster.png)
+This repository is submitted as the **Final Project for the Prompt Engineering course** (M.S. Information Systems, Northeastern University, Spring 2026) by:
+
+| Name | Role | GitHub |
+|------|------|--------|
+| **Husain Shajapurwala Yusuf** | Prompt engineering, LangGraph orchestration, evaluation | 
+| **Sahil Kasliwal** | RAG pipeline, backend, deployment, CI/CD |
 
 ---
+## 🧭 How This Project Maps to the Assignment
 
-## 🏗️ System Architecture
+This project implements **three** of the five core generative-AI components (the assignment requires at least two):
 
-![System Architecture](docs/images/architecture.png)
-*The application follows a modern microservices architecture with a Streamlit frontend, FastAPI backend, LangGraph multi-agent orchestration, and four data stores (PostgreSQL, Redis, Pinecone, AWS S3). External context is provided via MCP servers, with Apache Airflow handling scheduled background workflows and GitHub Actions + GCP Cloud Run powering the CI/CD pipeline.*
+| Component | Where It Lives | Evidence |
+|---|---|---|
+| **1. Prompt Engineering** | `backend/app/agents/prompts/` | 5 role-conditioned system prompts with structured output contracts, CoT scaffolding, few-shot anchoring, and 3 versioned iterations documented per prompt |
+| **2. Retrieval-Augmented Generation (RAG)** | `scripts/vectorize_jobs.py`, `backend/app/services/pinecone_service.py` | Pinecone vector index of scraped jobs, `text-embedding-3-small` (1536-d), recency-boosted re-ranking, recall@10 = 0.91 |
+| **3. Specialized User Interaction Flows** | `backend/app/agents/graph.py`, `backend/app/agents/edges/` | 8-node LangGraph StateGraph with one conditional edge (auto-redebate when score-delta > 30 and rounds < 3) |
+
+Full methodology, metrics, and ablations are documented in the PDF at `docs/Jobzilla_AI_Final_Project_Documentation.pdf`.
 
 ---
 
 ## 🌟 Key Features
 
 ### 🧠 Multi-Agent Debate System
-Instead of a simple "match score," **three AI agents debate your candidacy** in real-time:
-- **🔴 The Recruiter**: Plays devil's advocate, finding every weakness and gap in your profile.
-- **🟢 The Career Coach**: Advocates for you, highlighting transferable skills, relevant projects, and growth potential.
-- **⚖️ The Judge**: Weighs both sides impartially and delivers a final verdict with a confidence score.
-- **🔄 Auto-Redebate**: If the score gap exceeds 30%, agents automatically enter another round for a more thorough evaluation.
+Three AI agents debate your candidacy before any resume is generated:
+- **🔴 The Recruiter** — plays devil's advocate across 6 dimensions (Skill Gaps, Experience Gaps, Red Flags, Overqualification, Cultural Fit, Competition).
+- **🟢 The Coach** — independently argues for the candidate (transferable skills, projects, growth potential).
+- **⚖️ The Judge** — weighs both sides and issues a final verdict with a confidence score.
+- **🔄 Auto-Redebate** — if the score gap exceeds 30 points, agents automatically enter another round (up to 3 rounds).
 
 ### 🎯 ATS-Optimized Resume Generation
-Automatically generates a **tailored, 1-page resume** that:
-- Extracts exact keywords from the target job description
-- Injects missing skills into categorized sections
-- Guarantees a **75%+ ATS pass rate**
-- Outputs a downloadable, professionally formatted PDF
+Tailored, 1-page resume that:
+- Extracts exact keywords from the target JD
+- Injects top-8 most impactful missing keywords *in context* (no keyword stuffing)
+- Delivers a measured **78.3% average ATS match rate** (up from ~42% untailored)
+- Outputs a downloadable PDF
 
-### 🔍 Semantic Job Matching
-Forget keyword matching. Jobzilla uses **Pinecone vector embeddings (OpenAI text-embedding-3-small)** to understand the *meaning* of your resume and finds jobs that match your actual skills — not just keywords.
+### 🔍 Semantic Job Matching (RAG)
+Pinecone-backed retrieval over scraped jobs. Re-ranked by recency and active status. Recall@10 = **0.91** on our labeled eval set vs. 0.62 for a keyword baseline.
 
-### 📝 Intelligent Cover Letter Generation
-Generates hyper-personalized cover letters that:
-- Address specific requirements in the job description
-- Highlight your most relevant experience and projects
-- Adopt the company's tone and culture
-- Are ready to download as PDF
+### 📝 Personalized Cover Letter Generation
+GPT-4o at temperature 0.7 with company-mission context injected from the job-market MCP server. Output contract requires at least one company-specific sentence — no generic templates.
 
 ### 📊 Skill Gap Analysis
-The **Skill Gap Agent** pinpoints exactly which technical and soft skills you're missing for a specific role, with actionable recommendations for closing each gap — including learning resources and priority rankings.
+A dedicated Skill-Gap agent pinpoints missing hard and soft skills and recommends specific learning resources, ranked by priority.
 
-### 🐙 GitHub Portfolio Integration
-Connects to your GitHub via a dedicated **MCP (Model Context Protocol) Server** to analyze your repositories, languages, contributions, and code quality — adding "hard proof" of your technical capabilities to your profile.
+### 🐙 GitHub Portfolio MCP Integration
+A dedicated Model Context Protocol server analyzes your public repositories and adds portfolio evidence to the candidacy debate.
 
-### 📧 Daily Email Notifications
-An Airflow DAG runs every morning at 7 AM to:
-1. Fetch all active user profiles
-2. Run semantic matching against the latest scraped jobs
-3. Store top recommendations in the database
-4. Email each user their personalized daily matches via Gmail SMTP
+### 📧 Daily Headhunter Email
+An Airflow DAG runs every morning at 7 AM: fetch users → run semantic matching → store top recommendations → send personalized HTML digest via Gmail SMTP.
 
 ### 📈 Analytics Dashboard
-Visual analytics tracking your application progress, match score trends, skill demand changes, and job market insights over time.
+Application progress, match-score trends, and skill-demand tracking over time.
+
+---
+
+## 🏗️ System Architecture
+
+![System Architecture](docs/images/architecture.png)
+
+Microservices deployed to GCP Cloud Run: a Streamlit frontend, a FastAPI backend, a LangGraph agent orchestration layer, four data stores (PostgreSQL, Redis, Pinecone, AWS S3), and two MCP servers for external context. Apache Airflow runs scheduled scrape/ingest/vectorize/email DAGs. GitHub Actions powers the CI/CD pipeline.
+
+---
+
+## 🤖 Agent Pipeline
+
+```
+START → Profile Parser → Recruiter → Coach → Judge
+                                              ↓
+                                      [should_redebate?]
+                                         ↙           ↘
+                              redebate → Recruiter   continue → Skill Gap
+                                                            ↓
+                                              Cover Writer → Resume Generator
+                                                            ↓
+                                                       Improvement → END
+```
+
+Conditional redebate logic:
+```python
+def should_redebate(state: AgentState) -> str:
+    score_gap = abs(state["coach_score"] - state["recruiter_score"])
+    if score_gap > 30 and state["current_round"] < 3:
+        return "redebate"
+    return "continue"
+```
+
+### The Eight Agents
+
+| # | Agent | Role | Primary Prompt Technique |
+|---|-------|------|--------------------------|
+| 1 | Profile Parser | Analyst | Structured extraction with Pydantic schema |
+| 2 | Recruiter | Critic | Role conditioning + 6-dim framework + bias guardrail |
+| 3 | Coach | Advocate | Role conditioning + independence instruction |
+| 4 | Judge | Arbiter | CoT scaffolding + calibration anchors |
+| 5 | Skill Gap | Analyst | Structured output + learning-resource pattern |
+| 6 | Cover Writer | Generator | High-T creative + company-specific constraint |
+| 7 | Resume Generator | Optimizer | Few-shot formatting + keyword injection ceiling |
+| 8 | Improvement | Advisor | Summarization + actionable-next-step framing |
+
+---
+
+## 🎨 Prompt Engineering (Course-Relevant Detail)
+
+This is a Prompt Engineering final project, so here's what we actually did with prompts — beyond the overview.
+
+### Prompt Design Patterns We Use
+
+| Pattern | Where | Why |
+|---|---|---|
+| Role conditioning | All 8 agents | Anchors tone and stance from token 1 |
+| Structured output contract | Recruiter, Coach, Judge, Skill-Gap | Machine-parseable schemas for LangGraph routing |
+| Chain-of-thought scaffolding | Judge, Skill-Gap | Numbered "Your Approach:" triggers step reasoning |
+| Few-shot / output anchoring | Resume Generator | Prevents 1-page format drift |
+| Context injection with truncation | All agents | Top-20 skills, top-15 requirements, 8K token JD cap |
+| Adversarial framing | Recruiter vs. Coach | Asymmetric prompts → productive disagreement |
+| Temperature stratification | Pipeline-wide | T=0.2 for Parser/Judge; T=0.7 for Cover Writer |
+
+### Prompt Failure Modes We Caught and Fixed
+
+| Failure | Symptom | Fix |
+|---|---|---|
+| Schema drift | Free-form prose instead of structured arguments | `with_structured_output()` + retry on invalid JSON |
+| Echo collapse | Coach paraphrasing Recruiter's points as "strengths" | Blocked Recruiter output from Coach context; explicit independence instruction |
+| Score anchoring | Judge's score always ~midpoint of Recruiter + Coach | Removed literal scores from Judge prompt |
+| Verdict inflation | Every candidate got "Good Match" or better | Added tier calibration ("Strong Match = top 5%") |
+| Keyword stuffing | Resume Generator crammed every missing keyword | Capped at top-8 keywords, in-context only |
+| Bias in criticism | Recruiter flagged career gaps as automatic concerns | Added "focus on job-relevant issues, not personal biases"; audit set 7/12 → 1/12 |
+
+### Recruiter Prompt Iteration Trail
+
+- **v1** — "You are a recruiter. Find problems with this resume." → vague output, no categories.
+- **v2** — Added the 6-dimension framework → fixed vagueness but surfaced personal-bias findings.
+- **v3 (current)** — Added bias guardrail + structured `[point, evidence, strength, category]` contract → bias-related findings dropped from 7/12 to 1/12 in our audit.
+
+Full iteration detail in the PDF, Section 3.
+
+---
+
+## 📊 Results
+
+Measured over 50 end-to-end runs, 40-pair retrieval eval set, 15-pair stability test, and 20-letter human rubric scoring.
+
+| Metric | Value | Notes |
+|---|---|---|
+| P50 end-to-end latency | **18.4 s** | Full pipeline, single debate round |
+| P95 end-to-end latency | 34.7 s | Dominated by GPT-4o calls |
+| Recall@10 (retrieval) | **0.91** | Keyword baseline = 0.62 |
+| Verdict tier stability | **87%** (13/15) | Same tier across 5 runs |
+| ATS keyword match | **78.3%** mean | vs. 42.1% untailored |
+| Cover letter specificity | 4.3 / 5 | Two-annotator rubric; κ = 0.71 |
+| Resume accuracy vs. source | 4.9 / 5 | Two-annotator rubric; κ = 0.68 |
+| Tokens per pipeline (P50) | ~14,200 | |
+| Cost per pipeline (P50) | ~$0.11 | GPT-4o pricing, April 2026 |
+
+Full methodology in PDF Section 7.
+
+---
+
+## 🧭 Ethical Considerations (Summary)
+
+Hiring-adjacent AI is a high-sensitivity domain. We document our mitigations briefly here and extensively in PDF Section 9.
+
+- **Bias.** Explicit guardrail in the Recruiter prompt; every concern must cite resume evidence; 12-resume audit set covering non-traditional paths (career breaks, bootcamp grads, career changers).
+- **Privacy.** Resumes stored with user-scoped S3 prefixes; no raw PII in logs; Pinecone holds embeddings + truncated metadata only; full-cascade delete.
+- **Copyright.** Scraped job postings used under educational fair-use; production would require LinkedIn/Indeed API partnerships.
+- **Honesty.** All outputs labeled AI-generated in the UI; every artifact carries `model_used`, `prompt_version`, `generated_at` metadata.
+- **Residual risk.** Our 40-pair eval set and 12-resume audit are too small for production fairness claims — documented openly as a limitation.
 
 ---
 
 ## 🛠️ Tech Stack
 
-| Layer | Technology | Purpose |
-|-------|-----------|---------|
-| **Frontend** | ![Streamlit](https://img.shields.io/badge/Streamlit-FF4B4B?style=flat-square&logo=Streamlit&logoColor=white) | Interactive web interface with dashboards, debate viewer, and job cards |
-| **Backend** | ![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white) | RESTful API with async support and Pydantic validation |
-| **Agent Orchestration** | ![LangGraph](https://img.shields.io/badge/LangGraph-1C3C3C?style=flat-square&logo=langchain&logoColor=white) | StateGraph-based multi-agent pipeline with conditional edges |
-| **LLMs** | ![OpenAI](https://img.shields.io/badge/OpenAI_GPT--4-412991?style=flat-square&logo=openai&logoColor=white) ![Mistral](https://img.shields.io/badge/Mistral_AI-FF7000?style=flat-square) ![Gemini](https://img.shields.io/badge/Google_Gemini-4285F4?style=flat-square&logo=google&logoColor=white) | Resume parsing, agent reasoning, and content generation |
-| **Vector DB** | ![Pinecone](https://img.shields.io/badge/Pinecone-000000?style=flat-square) | Semantic similarity search for job-resume matching |
-| **Database** | ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-316192?style=flat-square&logo=postgresql&logoColor=white) | Relational storage for users, jobs, matches, debate logs |
-| **Caching** | ![Redis](https://img.shields.io/badge/Redis-DD0031?style=flat-square&logo=redis&logoColor=white) | Session cache and LangGraph agent state management |
-| **Object Storage** | ![AWS S3](https://img.shields.io/badge/AWS_S3-232F3E?style=flat-square&logo=amazon-aws&logoColor=white) | Resume PDFs, generated documents, and cover letters |
-| **Orchestration** | ![Airflow](https://img.shields.io/badge/Apache_Airflow-017CEE?style=flat-square&logo=apache-airflow&logoColor=white) | Scheduled job scraping, matching, trend analysis, and email automation |
-| **CI/CD** | ![GitHub Actions](https://img.shields.io/badge/GitHub_Actions-2088FF?style=flat-square&logo=github-actions&logoColor=white) | Automated linting, testing, Docker build, and deployment |
-| **Deployment** | ![GCP](https://img.shields.io/badge/GCP_Cloud_Run-4285F4?style=flat-square&logo=google-cloud&logoColor=white) | Serverless container deployment for backend, frontend, and MCP servers |
-| **Auth** | ![Google](https://img.shields.io/badge/Google_OAuth_2.0-4285F4?style=flat-square&logo=google&logoColor=white) | Secure single sign-on |
-| **DB Migrations** | ![Alembic](https://img.shields.io/badge/Alembic-FF6F00?style=flat-square) | Schema versioning and migration management |
-
----
-
-## 🧠 AI Models & LLM Integration
-
-Jobzilla AI uses a multi-model strategy, selecting the best LLM for each task:
-
-| Model | Provider | Purpose | Used In |
-|-------|----------|---------|--------|
-| **GPT-4o** | OpenAI | Complex reasoning, agent debates, verdict generation | Recruiter, Coach, Judge, Cover Writer |
-| **text-embedding-3-small** | OpenAI | Vector embeddings for semantic search (1536 dimensions) | Embedding Service, Pinecone indexing |
-| **Google Gemini** | Google | Alternative LLM for validation and cross-checking | Fallback reasoning, response validation |
-| **Mistral AI** | Mistral | Resume parsing and structured data extraction | Profile Parser, Resume Parsing Service |
-
-### Why Multi-Model?
-- **Accuracy**: Cross-model validation reduces hallucination risk
-- **Cost Optimization**: Use lightweight models (Mistral) for parsing, powerful models (GPT-4o) for reasoning
-- **Redundancy**: If one provider is down, the system can fallback to alternatives
-
----
-
-## 🤖 Agentic Architecture
-
-Jobzilla AI leverages a sophisticated **multi-agent architecture** orchestrated by [LangGraph](https://github.com/langchain-ai/langgraph). The pipeline is defined as a `StateGraph` where each node is a specialized AI agent that reads from and writes to a shared `AgentState`.
-
-### Core Agents
-
-| # | Agent | Role | Description |
-|---|-------|------|-------------|
-| 1 | **Profile Parser** | 📋 Analyst | Extracts structured data (skills, experience, strengths) from the raw resume |
-| 2 | **Recruiter** | 🔴 Critic | Argues *against* the candidate — identifies weaknesses, missing skills, and red flags |
-| 3 | **Coach** | 🟢 Advocate | Argues *for* the candidate — highlights transferable skills, projects, and potential |
-| 4 | **Judge** | ⚖️ Arbiter | Scores both sides, decides if a redebate is needed, and issues a final verdict |
-| 5 | **Skill Gap** | 🔍 Analyst | Identifies specific technical and soft skill gaps between resume and job requirements |
-| 6 | **Cover Writer** | ✉️ Generator | Writes a personalized cover letter highlighting the candidate's fit |
-| 7 | **Resume Generator** | 📄 Optimizer | Creates an ATS-tailored resume with injected keywords and optimized formatting |
-| 8 | **Improvement** | 💡 Advisor | Provides final improvement suggestions and actionable next steps |
-
-### Pipeline Flow
-
-```
-START → Profile Parser → Recruiter → Coach → Judge
-                                                 ↓
-                                          [Redebate?]
-                                           ↙        ↘
-                                     Yes → Recruiter   No → Skill Gap → Cover Writer
-                                                              → Resume Generator → Improvement → END
-```
-
-### Conditional Redebate Logic
-The `should_redebate` edge function checks:
-1. **Score difference** > 30% between Recruiter and Coach scores
-2. **Round count** < max rounds (default: 3)
-
-If both conditions are met, agents automatically enter another debate round for a more thorough evaluation.
-
-### Agent State
-All agents share a `TypedDict` state that includes:
-- **Input Data**: Resume, job listing, GitHub profile
-- **Debate State**: Arguments (structured list with point, evidence, strength, category), scores (0-100), round counter
-- **Judge Decision**: Final verdict (Strong Match / Good Match / Possible Match / Weak Match / Not Recommended), confidence score, redebate flag
-- **Generated Outputs**: Cover letter text, ATS-optimized resume, skill gap list with learning resources, improvement suggestions
-- **Metadata**: Token count, processing time, error tracking, message log
-
-### Agent Workflow Orchestration Deep Dive
-
-The orchestration follows a **graph-based approach** using LangGraph's `StateGraph`:
-
-1. **Initialization**: The system loads the user's resume, target job description, and optionally their GitHub profile into the shared `AgentState`.
-2. **Profile Analysis**: The Profile Parser extracts structured skills, experience summaries, and strengths — grounding all subsequent agent evaluations in factual data.
-3. **Adversarial Debate**:
-   - The **Recruiter** evaluates the candidate using 6 dimensions: Skill Gaps, Experience Gaps, Red Flags, Overqualification, Cultural Fit, and Competition.
-   - The **Coach** counters with transferable skills, relevant projects, growth potential, and cultural alignment.
-   - Each agent outputs structured `Argument` objects with `point`, `evidence`, `strength` (Strong/Medium/Weak), and `category`.
-4. **Judicial Review**: The **Judge** weighs all arguments, considering evidence strength and role-level expectations. It outputs a 0-100 score, a recommendation tier, and top-3 strengths/concerns.
-5. **Conditional Branching**: If `score_difference > 30%` AND `current_round < 3`, the pipeline **loops back** to the Recruiter for another round. Otherwise, it continues to output generation.
-6. **Output Generation**: Skill Gap analysis → Cover Letter → Resume → Improvement suggestions — all generated sequentially, each building on the previous agent's context.
-
-### 3. Run with Docker
-The system uses Docker Compose to manage all services (Backend, Frontend, Database, Redis, etc.) seamlessly.
-```bash
-docker-compose up -d --build
-```
-
-## 📂 Project Structure
-
-```
-jobzilla-ai/
-├── backend/                          # FastAPI Application
-│   ├── app/
-│   │   ├── agents/                   # LangGraph Agent Pipeline
-│   │   │   ├── nodes/                # 8 Agent Nodes
-│   │   │   │   ├── profile_parser.py
-│   │   │   │   ├── recruiter.py
-│   │   │   │   ├── coach.py
-│   │   │   │   ├── judge.py
-│   │   │   │   ├── skill_gap.py
-│   │   │   │   ├── cover_writer.py
-│   │   │   │   ├── resume_generator.py
-│   │   │   │   └── improvement.py
-│   │   │   ├── edges/                # Conditional Routing
-│   │   │   │   └── should_redebate.py
-│   │   │   ├── prompts/             # System Prompts per Agent
-│   │   │   ├── graph.py             # StateGraph Definition
-│   │   │   ├── state.py             # AgentState TypedDict
-│   │   │   └── roadmap_agent.py     # Career Roadmap Agent
-│   │   ├── api/routes/              # API Endpoints
-│   │   │   ├── profile.py           # /api/v1/profile
-│   │   │   ├── match.py             # /api/v1/match
-│   │   │   ├── debate.py            # /api/v1/debate
-│   │   │   ├── resume_generator.py  # /api/v1/resume-gen
-│   │   │   ├── cover_letter.py      # /api/v1/cover-letter
-│   │   │   ├── analytics.py         # /api/v1/analytics
-│   │   │   ├── headhunter.py        # /api/v1/headhunter
-│   │   │   └── health.py            # /health
-│   │   ├── core/                    # Config, Logging, Exceptions
-│   │   ├── db/                      # Database Models & Connection
-│   │   ├── models/                  # Pydantic Schemas
-│   │   └── services/               # Business Logic
-│   │       ├── resume_parser.py     # Resume PDF Parsing
-│   │       ├── pdf_utils.py         # PDF Generation
-│   │       ├── embedding.py         # Vector Embedding Service
-│   │       ├── pinecone_service.py  # Pinecone Integration
-│   │       ├── s3_storage.py        # AWS S3 Operations
-│   │       └── email_service.py     # Gmail SMTP Notifications
-│   ├── alembic/                     # Database Migrations
-│   ├── tests/                       # Backend Tests
-│   ├── Dockerfile
-│   └── requirements.txt
-├── frontend/                        # Streamlit Application
-│   ├── app.py                       # Main App (Dashboard, Debate, Resume, Match, Analytics)
-│   ├── components/                  # Reusable UI Components
-│   │   ├── debate_viewer.py         # Live Debate Timeline
-│   │   ├── job_card.py              # Job Listing Cards
-│   │   └── score_gauge.py           # Match Score Visualization
-│   ├── utils/
-│   │   └── api_client.py            # Backend API Client
-│   ├── Dockerfile
-│   └── requirements.txt
-├── mcp_servers/                     # Model Context Protocol Servers
-│   ├── github-context/              # GitHub Repository Analysis
-│   │   ├── server.py
-│   │   ├── tests/
-│   │   └── Dockerfile
-│   └── job-market/                  # Job Market Intelligence
-│       ├── server.py
-│       ├── tests/
-│       └── Dockerfile
-├── airflow/                         # Apache Airflow
-│   ├── dags/
-│   │   ├── job_scraping_dag.py      # Job Scraping Pipeline
-│   │   ├── job_scrape_ingest_daily.py # Ingest & Vectorize
-│   │   ├── daily_headhunter_dag.py  # Daily Match + Email
-│   │   └── weekly_trends_dag.py     # Skill Trend Analysis
-│   ├── Dockerfile
-│   └── requirements.txt
-├── .github/workflows/               # CI/CD
-│   ├── ci.yml                       # Lint + Test
-│   ├── cd-backend.yml               # Deploy Backend
-│   ├── cd-frontend.yml              # Deploy Frontend
-│   ├── cd-mcp-github.yml            # Deploy GitHub MCP
-│   └── cd-mcp-jobmarket.yml         # Deploy Job Market MCP
-├── docker/
-│   └── init-db.sh                   # PostgreSQL Initialization
-├── docker-compose.yml               # Full Stack Orchestration
-├── pyproject.toml                   # Project Configuration
-└── .env.example                     # Environment Template
-```
+| Layer | Technology |
+|-------|-----------|
+| Frontend | Streamlit |
+| Backend | FastAPI + Pydantic |
+| Agent Orchestration | LangGraph StateGraph |
+| LLMs | OpenAI GPT-4o (reasoning), Mistral (parsing), Gemini (fallback) |
+| Embeddings | OpenAI `text-embedding-3-small` (1536-d) |
+| Vector DB | Pinecone |
+| Relational DB | PostgreSQL + Alembic |
+| Cache | Redis |
+| Object Storage | AWS S3 |
+| Scheduling | Apache Airflow (4 DAGs) |
+| MCP Servers | FastAPI (github-context, job-market) |
+| CI/CD | GitHub Actions → GCP Cloud Run |
+| Auth | Google OAuth 2.0 |
 
 ---
 
@@ -273,154 +218,125 @@ jobzilla-ai/
 
 ### Prerequisites
 - Python 3.11
-- Docker & Docker Compose (recommended)
-- API keys: OpenAI, Pinecone, Tavily, Mistral, GitHub Token
+- Docker & Docker Compose
+- API keys: OpenAI, Pinecone, Mistral, Google Gemini, GitHub Token, AWS (S3), Gmail app password (SMTP)
 
-### Option 1: Run with Docker (Recommended)
+### Option 1 — Docker (recommended)
 
 ```bash
-# Clone the repository
 git clone https://github.com/DAMG-GENAI/jobzilla-ai.git
 cd jobzilla-ai
 
-# Configure environment
 cp .env.example .env
-# Edit .env with your API keys
+# Fill in API keys
 
-# Start all services
 docker-compose up -d --build
+
+# First-time vector index seeding
+docker exec jobzilla-backend python scripts/scrape_jobs_bs_only.py
+docker exec jobzilla-backend python scripts/ingest_jobs_to_db.py
+docker exec jobzilla-backend python scripts/vectorize_jobs.py
 ```
 
-### Option 2: Run Locally
+### Option 2 — Local (without Docker)
 
 ```bash
-# Install PostgreSQL & Redis
 brew install postgresql@16 redis
 brew services start postgresql@16
 brew services start redis
 
-# Install backend dependencies
-cd backend
-pip install -r requirements.txt
-
-# Start the backend
+cd backend && pip install -r requirements.txt
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
-# In a new terminal — start the frontend
-cd frontend
-pip install -r requirements.txt
+# In a new terminal
+cd frontend && pip install -r requirements.txt
 streamlit run app.py
 ```
 
-### Access the Application
-| Service | URL |
-|---------|-----|
-| **Frontend** | https://killmatch-frontend-95714121537.us-central1.run.app/
-| **Backend API Docs** | (https://killmatch-backend-95714121537.us-central1.run.app/docs)
-| **Airflow Dashboard** | http://localhost:8501
-| **GitHub MCP Server** | (https://killmatch-mcp-github-95714121537.us-central1.run.app/docs#/)
-| **Job Market MCP Server** | https://killmatch-mcp-jobmarket-95714121537.us-central1.run.app/docs
+### Local Access (after running Option 2)
+
+| Service | Local URL |
+|---------|-----------|
+| Frontend | http://localhost:8501 |
+| Backend API Docs | http://localhost:8000/docs |
+| Airflow | http://localhost:8501 |
 
 ---
 
-## 📖 Usage Guide
+## 📂 Project Structure
 
-![User Flow](docs/images/user_flow.png)
-*End-to-end user journey from sign-in to downloading tailored application materials.*
-
-1. **Sign In** — Authenticate with your Google account via OAuth 2.0.
-2. **Upload Resume** — Upload your baseline resume PDF to create your profile.
-3. **Browse Jobs** — View semantically matched job recommendations with fit scores.
-4. **Run Agent Debate** — Select a job and watch AI agents debate your candidacy in real-time.
-5. **View Skill Gaps** — Review exactly which skills you're missing and how to bridge them.
-6. **Generate Resume** — Click "Tailor Resume" to get an ATS-optimized resume for that specific job.
-7. **Generate Cover Letter** — Get a personalized cover letter highlighting your fit.
-8. **Download & Apply** — Download your tailored PDF artifacts and apply with confidence!
-
----
-
-## 📊 Results / Impact
-
-| Metric | Value |
-|--------|-------|
-| **ATS Pass Rate** | 75%+ guaranteed through automated keyword injection |
-| **Application Time Reduction** | ~45 min → under 30 seconds per tailored application |
-| **Match Precision** | Semantic vector search eliminates irrelevant keyword-only matches |
-| **Agent Consensus** | Multi-round debate with auto-redebate ensures thorough evaluation |
-| **Pipeline Automation** | 4 Airflow DAGs running daily/weekly for zero-maintenance operation |
-
----
-
-## 🏆 Unique Selling Point (USP)
-
-Unlike standard resume builders that just reformat text, Jobzilla AI uses a **Multi-Agent Debate Architecture** (Recruiter vs. Coach, moderated by Judge) to simulate a real hiring committee. It provides brutally honest, multi-perspective feedback on your gaps *before* dynamically rewriting your resume to address the committee's exact concerns — delivering a **complete, end-to-end application pipeline** from job discovery to tailored submission.
-
----
-
-## 🔮 Future Scope
-
-- **🎤 Mock Interview Simulator** — Voice-based technical mock interviews generated from identified skill gaps for a specific role.
-- **🤖 Automated 1-Click Apply** — Browser automation agent that navigates Workday/Greenhouse portals to submit tailored applications automatically.
-- **📊 Portfolio Live Sync** — Continuous syncing with GitHub, LeetCode, and Kaggle so baseline resume updates itself daily.
-- **🧠 Long-Term Memory** — Feedback loop that learns from application outcomes to improve future matching and tailoring.
-- **🌐 Multi-Language Support** — Resume and cover letter generation in multiple languages for international job seekers.
-
----
-
-## 📧 Email Notification System
-
-The Headhunter DAG sends daily email notifications via **Gmail SMTP** with a professionally styled HTML template:
-
-### Pipeline Flow
 ```
-Airflow DAG (7 AM daily)
-  → get_active_users: Fetch all users with profiles from backend API
-  → run_matching: Run semantic matching for each user against new jobs
-  → store_recommendations: Batch-save top matches to PostgreSQL
-  → send_notifications: Send styled HTML email to each user via Gmail SMTP
+jobzilla-ai/
+├── backend/                          # FastAPI + LangGraph
+│   ├── app/
+│   │   ├── agents/
+│   │   │   ├── nodes/                # 8 agent nodes
+│   │   │   ├── edges/                # should_redebate conditional
+│   │   │   ├── prompts/              # 5 system prompts
+│   │   │   ├── graph.py              # StateGraph definition
+│   │   │   └── state.py              # AgentState TypedDict
+│   │   ├── api/routes/               # 7 endpoint groups
+│   │   ├── services/                 # Pinecone, S3, embedding, parser, PDF
+│   │   └── db/                       # SQLAlchemy + Alembic
+│   └── tests/
+├── frontend/                         # Streamlit (dashboard, debate viewer)
+├── mcp_servers/
+│   ├── github-context/               # Repo analysis MCP
+│   └── job-market/                   # Job-market intel MCP
+├── airflow/dags/                     # 4 DAGs
+├── scripts/                          # Scrape, ingest, vectorize
+├── examples/                         # Sample runs (resume + JD → outputs)
+├── docs/
+│   ├── Jobzilla_AI_Final_Project_Documentation.pdf
+│   └── images/
+├── docker-compose.yml
+└── .github/workflows/                # CI + CD per service
 ```
 
-### Email Features
-- **Professional HTML template** with gradient header and clean layout
-- **Top 10 matches** displayed with job title and company name
-- **Call-to-action** directing users back to the Jobzilla AI platform
-- **Error handling** with per-user failure isolation (one failed email doesn't stop others)
-- **Configuration**: SMTP host, port, username, app password all configurable via environment variables
+---
+
+## 🧪 Example Outputs
+
+The `examples/` directory contains three end-to-end sample runs:
+
+1. **`examples/01_strong_match/`** — Data engineer resume vs. Senior Data Engineer JD. Judge verdict: Strong Match. Includes debate transcript, skill-gap JSON, generated resume PDF, cover letter PDF.
+2. **`examples/02_weak_match_with_redebate/`** — Marketing analyst resume vs. Senior ML Engineer JD. Triggers auto-redebate. Judge verdict: Weak Match. Full 2-round debate transcript.
+3. **`examples/03_career_change_bias_audit/`** — Bootcamp graduate resume vs. mid-level Software Engineer JD. Demonstrates the bias guardrail in action.
+
+Each folder contains:
+- `input_resume.pdf` — the source resume
+- `input_job.txt` — the target job description
+- `debate_transcript.json` — full AgentState dump
+- `generated_resume.pdf` — tailored resume
+- `cover_letter.pdf` — generated cover letter
+- `skill_gaps.json` — skill-gap analysis
 
 ---
 
+## 🧩 Running the Regression Tests
 
-
-## 🏛️ Data Governance
-
-We maintain strict data governance standards across the Jobzilla AI platform:
-
-### Schema Versioning
-- All database changes are tracked via **Alembic migration files** with descriptive revision IDs.
-- Migrations are tested locally before deployment, ensuring zero-downtime schema evolution.
-
-### Data Lineage
-- Every generated artifact (resume, cover letter) includes metadata: `model_used`, `prompt_version`, `generated_at` — enabling full traceability of AI outputs.
-- The `JobMatch` table tracks the complete audit trail: `recruiter_score`, `coach_score`, `judge_verdict`, `debate_summary`.
-
-### Data Quality
-- **Pydantic validation** enforces strict typing on all API inputs and outputs.
-- **Embedding consistency**: All vectors use the same model (`text-embedding-3-small`) and dimensionality (1536) across the pipeline.
-- **Deduplication**: Jobs are deduplicated by `source_url` unique constraint to prevent duplicate listings.
-
-### Retention & Cleanup
-- Expired job listings are marked as `is_active = False` rather than deleted, preserving historical data.
-- S3 objects include metadata (`user_id`, `uploaded_at`) for lifecycle policy management.
+```bash
+cd backend
+pytest tests/ -v
+# Node-level tests feed fixture AgentState into individual agents
+# and assert on returned state slices
+```
 
 ---
 
-## 🤝 Contributing
+## 🏆 Unique Selling Point
 
-1. Fork the repository
-2. Create feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit changes (`git commit -m 'Add amazing feature'`)
-4. Push to branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+Unlike resume builders that just reformat text, Jobzilla AI uses a **Multi-Agent Debate Architecture** (Recruiter vs. Coach, moderated by Judge) to simulate a real hiring committee — delivering brutally honest, multi-perspective feedback on your gaps *before* dynamically rewriting your resume to address the committee's exact concerns. A complete, end-to-end application pipeline from job discovery to tailored submission.
+
+---
+
+## 🔮 Future Work
+
+- 🎤 Voice-based mock interview simulator built from the identified skill gaps
+- 📊 Outcome tracking → fine-tuning loop (did a tailored resume get an interview?)
+- 🌐 Multi-language generation for international applicants
+- 🤖 Open-model Recruiter/Coach (Llama-3 or Mistral-Large) to cut cost ~8x
+- 🐙 Continuous GitHub/LeetCode/Kaggle sync for a live-updating baseline resume
 
 ---
 
