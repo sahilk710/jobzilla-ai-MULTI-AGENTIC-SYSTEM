@@ -23,8 +23,8 @@ Built with **GPT-4o** for reasoning, **Mistral** for resume parsing, **Pinecone*
 
 This repository is submitted as the **Final Project for the Prompt Engineering course** (M.S. Information Systems, Northeastern University, Spring 2026) by:
 
-| Name | Role | GitHub |
-|------|------|--------|
+| Name | Role | 
+|------|------|
 | **Husain Shajapurwala Yusuf** | Prompt engineering, LangGraph orchestration, evaluation | 
 | **Sahil Kasliwal** | RAG pipeline, backend, deployment, CI/CD |
 
